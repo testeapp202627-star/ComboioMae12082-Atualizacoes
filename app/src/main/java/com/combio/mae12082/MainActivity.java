@@ -362,13 +362,21 @@ public class MainActivity extends Activity {
                     m.put("data", dataAtual());
                     movimentos.put(m);
                     salvar();
-                    atualizarTela();
-                    aviso("Saída registrada para " + frente + "!");
+                    perguntarProximaSaida(frente);
                 } catch(Exception e) {
                     aviso("Informe uma quantidade válida.");
                 }
             })
             .setNegativeButton("Cancelar", null).show();
+    }
+
+    void perguntarProximaSaida(String frente) {
+        new AlertDialog.Builder(this)
+            .setTitle("Saída registrada!")
+            .setMessage("Deseja registrar outra saída para " + frente + "?")
+            .setPositiveButton("Adicionar outra saída", (d, w) -> selecionarProdutoSaida(frente))
+            .setNegativeButton("Finalizar", (d, w) -> atualizarTela())
+            .show();
     }
 
     void registrar(int produto, String tipo) {

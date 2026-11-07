@@ -19,9 +19,11 @@ import java.util.*;
 
 public class MainActivity extends Activity {
 
-    String[] produtos = {"Diesel", "Óleo lubrificante (tanque)", "Óleo 68", "Óleo 10W30", "Óleo 15W40"};
+    String[] produtos = {"Diesel", "Óleo 68", "Óleo 10W30", "Óleo 15W40"};
     JSONArray movimentos = new JSONArray();
     LinearLayout raiz;
+    int telaProduto = -1;
+    boolean submenuOleos = false;
     TextView status;
     Button atualizar;
     ToneGenerator som;
@@ -44,9 +46,26 @@ public class MainActivity extends Activity {
 
     void carregar() {
         try {
-            String dados = getSharedPreferences("estoque",0).getString("movimentos","[]");
-            movimentos = new JSONArray(dados);
-        } catch(Exception e) { movimentos = new JSONArray(); }
+            android.content.SharedPreferences prefs = getSharedPreferences("estoque",0);
+            movimentos = new JSONArray(prefs.getString("movimentos","[]"));
+
+            if(!prefs.getBoolean("migracaoV13",false)) {
+                JSONArray corrigidos = new JSONArray();
+                for(int i=0;i<movimentos.length();i++) {
+                    JSONObject m = movimentos.optJSONObject(i);
+                    if(m==null) continue;
+                    int p = m.optInt("produto",-1);
+                    if(p==1) continue;
+                    if(p>1) m.put("produto",p-1);
+                    if(p>=0 && p<=4) corrigidos.put(m);
+                }
+                movimentos = corrigidos;
+                prefs.edit().putBoolean("migracaoV13",true).apply();
+                salvar();
+            }
+        } catch(Exception e) {
+            movimentos = new JSONArray();
+        }
     }
 
     void salvar() {
@@ -95,10 +114,8 @@ public class MainActivity extends Activity {
         atualizarTela();
     }
 
-    void atualizarTela() {
-        raiz.removeAllViews();
-
-        TextView titulo = texto("COMBOIO\nMÃE 12082",27);
+    void cabecalho() {
+        TextView titulo = texto("COMBOIO\\nMÃE 12082",27);
         titulo.setGravity(Gravity.CENTER);
         titulo.setTextColor(Color.rgb(15,90,40));
         raiz.addView(titulo);
@@ -109,61 +126,62 @@ public class MainActivity extends Activity {
 
         atualizar = botao("Verificar atualização", () -> verificarAtualizacao());
         raiz.addView(atualizar);
+    }
 
-        raiz.addView(texto("ESTOQUES DISPONÍVEIS",21));
+    void atualizarTela() {
+        telaProduto = -1;
+        submenuOleos = false;
+        raiz.removeAllViews();
+        cabecalho();
 
-        for(int i=0;i<produtos.length;i++) {
-            final int p = i;
-            LinearLayout caixa = new LinearLayout(this);
-            caixa.setOrientation(1);
-            caixa.setPadding(10,10,10,10);
-            caixa.setBackgroundColor(Color.WHITE);
+        raiz.addView(texto("CONTROLE DE ESTOQUE",21));
+        raiz.addView(botao("⛽ TANQUE DE DIESEL", () -> abrirProduto(0)));
+        raiz.addView(botao("ÓLEOS LUBRIFICANTES", () -> abrirOleos()));
+        raiz.addView(botao("GERAR RELATÓRIO PDF", () -> gerarPDF()));
+        raiz.addView(botao("RESETAR TODO O ESTOQUE", () -> resetar()));
+    }
 
-            TextView nome = texto(produtos[i],19);
-            nome.setTextColor(Color.rgb(20,90,45));
-            caixa.addView(nome);
+    void abrirOleos() {
+        telaProduto = -1;
+        submenuOleos = true;
+        raiz.removeAllViews();
+        cabecalho();
 
-            TextView quantidade = texto("Saldo: "+litros(saldo(i)),22);
-            quantidade.setTextColor(Color.BLACK);
-            caixa.addView(quantidade);
+        raiz.addView(texto("ÓLEOS LUBRIFICANTES",22));
+        raiz.addView(botao("ÓLEO 68", () -> abrirProduto(1)));
+        raiz.addView(botao("ÓLEO 10W30", () -> abrirProduto(2)));
+        raiz.addView(botao("ÓLEO 15W40", () -> abrirProduto(3)));
+        raiz.addView(botao("VOLTAR", () -> atualizarTela()));
+    }
 
-            LinearLayout botoes = new LinearLayout(this);
-            botoes.setOrientation(0);
-            Button entrada = botao("＋ Entrada", () -> registrar(p,"Entrada"));
-            Button saida = botao("－ Saída", () -> registrar(p,"Saída"));
-            botoes.addView(entrada,new LinearLayout.LayoutParams(0,-2,1));
-            botoes.addView(saida,new LinearLayout.LayoutParams(0,-2,1));
-            caixa.addView(botoes);
+    void abrirProduto(int produto) {
+        telaProduto = produto;
+        submenuOleos = false;
+        raiz.removeAllViews();
+        cabecalho();
 
-            LinearLayout.LayoutParams margem = new LinearLayout.LayoutParams(-1,-2);
-            margem.setMargins(0,8,0,8);
-            raiz.addView(caixa,margem);
-        }
+        raiz.addView(texto(produtos[produto].toUpperCase(),23));
+        TextView quantidade = texto("Saldo disponível: "+litros(saldo(produto)),22);
+        quantidade.setTextColor(Color.BLACK);
+        raiz.addView(quantidade);
 
-        raiz.addView(texto("HISTÓRICO DE MOVIMENTAÇÕES",21));
+        raiz.addView(botao("＋ ENTRADA", () -> registrar(produto,"Entrada")));
+        raiz.addView(botao("－ SAÍDA", () -> registrar(produto,"Saída")));
+        raiz.addView(texto("HISTÓRICO DE MOVIMENTAÇÕES",20));
 
-        if(movimentos.length()==0) {
-            raiz.addView(texto("Nenhuma movimentação registrada.",15));
-        }
-
+        boolean encontrou = false;
         for(int i=movimentos.length()-1;i>=0;i--) {
-            final int indice = i;
             JSONObject m = movimentos.optJSONObject(i);
-            if(m==null) continue;
-
-            int p = m.optInt("produto");
-            String nome = p>=0 && p<produtos.length ? produtos[p] : "Produto";
-            String tipo = m.optString("tipo");
-            String data = m.optString("data");
-            double qtd = m.optDouble("qtd");
+            if(m==null || m.optInt("produto")!=produto) continue;
+            encontrou = true;
+            final int indice = i;
 
             LinearLayout item = new LinearLayout(this);
             item.setOrientation(1);
             item.setPadding(8,8,8,8);
             item.setBackgroundColor(Color.WHITE);
-
-            item.addView(texto(nome+" | "+tipo,17));
-            item.addView(texto(litros(qtd)+" | "+data,14));
+            item.addView(texto(m.optString("tipo")+" | "+litros(m.optDouble("qtd")),17));
+            item.addView(texto(m.optString("data"),14));
 
             LinearLayout acoes = new LinearLayout(this);
             acoes.addView(botao("Editar", () -> editar(indice)));
@@ -175,8 +193,12 @@ public class MainActivity extends Activity {
             raiz.addView(item,margem);
         }
 
+        if(!encontrou) raiz.addView(texto("Nenhuma movimentação registrada.",15));
         raiz.addView(botao("GERAR RELATÓRIO PDF", () -> gerarPDF()));
-        raiz.addView(botao("RESETAR TODO O ESTOQUE", () -> resetar()));
+        raiz.addView(botao("VOLTAR", () -> {
+            if(produto==0) atualizarTela();
+            else abrirOleos();
+        }));
     }
 
     void registrar(int produto, String tipo) {
@@ -202,7 +224,7 @@ public class MainActivity extends Activity {
                     m.put("data",dataAtual());
                     movimentos.put(m);
                     salvar();
-                    atualizarTela();
+                    abrirProduto(produto);
                     aviso("Movimentação registrada!");
                 } catch(Exception e) { aviso("Informe uma quantidade válida."); }
             })
@@ -256,7 +278,7 @@ public class MainActivity extends Activity {
                     antigo.put("tipo",novoTipo);
                     antigo.put("data",dataAtual());
                     salvar();
-                    atualizarTela();
+                    abrirProduto(antigo.optInt("produto"));
                     aviso("Registro atualizado!");
                 } catch(Exception e) { aviso("Quantidade inválida."); }
             })
@@ -268,12 +290,13 @@ public class MainActivity extends Activity {
             .setTitle("Excluir movimentação?")
             .setMessage("Deseja apagar este registro?")
             .setPositiveButton("Excluir",(d,w) -> {
+                int produto = movimentos.optJSONObject(indice).optInt("produto");
                 JSONArray novo = new JSONArray();
                 for(int i=0;i<movimentos.length();i++)
                     if(i!=indice) novo.put(movimentos.opt(i));
                 movimentos = novo;
                 salvar();
-                atualizarTela();
+                abrirProduto(produto);
             })
             .setNegativeButton("Cancelar",null).show();
     }

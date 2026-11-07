@@ -150,6 +150,7 @@ public class MainActivity extends Activity {
         raiz.addView(texto("CONTROLE DE ESTOQUE",21));
         raiz.addView(botao("⛽ TANQUE DE DIESEL", () -> abrirProduto(0)));
         raiz.addView(botao("ÓLEOS LUBRIFICANTES", () -> abrirOleos()));
+        raiz.addView(botao("REGISTRAR SAÍDA POR FRENTE", () -> selecionarFrente()));
         raiz.addView(botao("GERAR RELATÓRIO PDF", () -> gerarPDF()));
         raiz.addView(botao("RESETAR TODO O ESTOQUE", () -> resetar()));
     }
@@ -300,7 +301,7 @@ public class MainActivity extends Activity {
             item.setOrientation(1);
             item.setPadding(8,8,8,8);
             item.setBackgroundColor(Color.WHITE);
-            item.addView(texto(m.optString("tipo")+" | "+litros(m.optDouble("qtd")),17));
+            item.addView(texto(m.optString("tipo")+(m.optString("frente","").isEmpty()?"":" | "+m.optString("frente"))+" | "+litros(m.optDouble("qtd")),17));
             item.addView(texto(m.optString("data"),14));
 
             LinearLayout acoes = new LinearLayout(this);
@@ -319,6 +320,55 @@ public class MainActivity extends Activity {
             if(produto==0) atualizarTela();
             else abrirOleos();
         }));
+    }
+
+
+    void selecionarFrente() {
+        String[] frentes = {"Frente 1", "Frente 2", "Frente 3", "Frente 4"};
+        new AlertDialog.Builder(this)
+            .setTitle("Selecione a frente")
+            .setItems(frentes, (d, qual) -> selecionarProdutoSaida(frentes[qual]))
+            .setNegativeButton("Cancelar", null).show();
+    }
+
+    void selecionarProdutoSaida(String frente) {
+        String[] nomes = produtos.toArray(new String[0]);
+        new AlertDialog.Builder(this)
+            .setTitle(frente + " - Selecione o produto")
+            .setItems(nomes, (d, qual) -> registrarSaidaFrente(qual, frente))
+            .setNegativeButton("Cancelar", null).show();
+    }
+
+    void registrarSaidaFrente(int produto, String frente) {
+        EditText campo = new EditText(this);
+        campo.setHint("Quantidade em litros");
+        campo.setInputType(8194);
+        new AlertDialog.Builder(this)
+            .setTitle("Saída - " + frente + " - " + produtos.get(produto))
+            .setView(campo)
+            .setPositiveButton("Registrar saída", (d, w) -> {
+                try {
+                    double qtd = Double.parseDouble(campo.getText().toString().replace(",", "."));
+                    if (qtd <= 0) throw new Exception();
+                    if (qtd > saldo(produto)) {
+                        aviso("Estoque insuficiente. Disponível: " + litros(saldo(produto)));
+                        return;
+                    }
+                    JSONObject m = new JSONObject();
+                    m.put("produto", produto);
+                    m.put("tipo", "Saída");
+                    m.put("qtd", qtd);
+                    m.put("frente", frente);
+                    m.put("data", dataAtual());
+                    movimentos.put(m);
+                    salvar();
+                    atualizarTela();
+                    aviso("Saída registrada para " + frente + "!");
+                } catch(Exception e) {
+                    aviso("Informe uma quantidade válida.");
+                }
+            })
+            .setNegativeButton("Cancelar", null).show();
     }
 
     void registrar(int produto, String tipo) {
@@ -477,7 +527,7 @@ public class MainActivity extends Activity {
                 if(m==null) continue;
                 int p = m.optInt("produto");
                 String nome = p>=0 && p<produtos.size() ? produtos.get(p) : "Produto";
-                String linha = m.optString("data")+" | "+nome+" | "+m.optString("tipo")+" | "+litros(m.optDouble("qtd"));
+                String linha = m.optString("data")+" | "+nome+" | "+m.optString("tipo")+(m.optString("frente","").isEmpty()?"":" | "+m.optString("frente"))+" | "+litros(m.optDouble("qtd"));
 
                 if(y>810) {
                     pdf.finishPage(page);

@@ -19,7 +19,7 @@ import java.util.*;
 
 public class MainActivity extends Activity {
 
-    String[] produtos = {"Diesel", "Óleo 68", "Óleo 10W30", "Óleo 15W40"};
+    ArrayList<String> produtos = new ArrayList<>(Arrays.asList("Diesel", "Óleo 68", "Óleo 10W30", "Óleo 15W40"));
     JSONArray movimentos = new JSONArray();
     LinearLayout raiz;
     int telaProduto = -1;
@@ -48,7 +48,14 @@ public class MainActivity extends Activity {
         try {
             android.content.SharedPreferences prefs = getSharedPreferences("estoque",0);
             movimentos = new JSONArray(prefs.getString("movimentos","[]"));
-
+            if(prefs.contains("produtos")) {
+                JSONArray listaSalva = new JSONArray(prefs.getString("produtos","[]"));
+                produtos.clear();
+                produtos.add("Diesel");
+                for(int i=0;i<listaSalva.length();i++) produtos.add(listaSalva.optString(i));
+            } else {
+                salvarProdutos();
+            }
             if(!prefs.getBoolean("migracaoV13",false)) {
                 JSONArray corrigidos = new JSONArray();
                 for(int i=0;i<movimentos.length();i++) {
@@ -66,6 +73,12 @@ public class MainActivity extends Activity {
         } catch(Exception e) {
             movimentos = new JSONArray();
         }
+    }
+
+    void salvarProdutos() {
+        JSONArray lista = new JSONArray();
+        for(int i=1;i<produtos.size();i++) lista.put(produtos.get(i));
+        getSharedPreferences("estoque",0).edit().putString("produtos",lista.toString()).apply();
     }
 
     void salvar() {
@@ -146,12 +159,119 @@ public class MainActivity extends Activity {
         submenuOleos = true;
         raiz.removeAllViews();
         cabecalho();
-
         raiz.addView(texto("ÓLEOS LUBRIFICANTES",22));
-        raiz.addView(botao("ÓLEO 68", () -> abrirProduto(1)));
-        raiz.addView(botao("ÓLEO 10W30", () -> abrirProduto(2)));
-        raiz.addView(botao("ÓLEO 15W40", () -> abrirProduto(3)));
+
+        for(int i=1;i<produtos.size();i++) {
+            final int indice = i;
+            raiz.addView(botao(produtos.get(i).toUpperCase(),
+                () -> abrirProduto(indice)));
+        }
+
+        raiz.addView(botao("＋ ADICIONAR ÓLEO", () -> adicionarOleo()));
+        raiz.addView(botao("EDITAR ÓLEO", () -> selecionarOleo(false)));
+        raiz.addView(botao("EXCLUIR ÓLEO", () -> selecionarOleo(true)));
         raiz.addView(botao("VOLTAR", () -> atualizarTela()));
+    }
+
+    void adicionarOleo() {
+        EditText campo = new EditText(this);
+        campo.setHint("Nome do novo óleo");
+        new AlertDialog.Builder(this)
+            .setTitle("Adicionar óleo")
+            .setView(campo)
+            .setPositiveButton("Salvar",(d,w) -> {
+                String nome = campo.getText().toString().trim();
+                if(nome.isEmpty() || nome.equalsIgnoreCase("Diesel")) {
+                    aviso("Informe um nome válido.");
+                    return;
+                }
+                if(nomeExiste(nome,-1)) {
+                    aviso("Esse óleo já está cadastrado.");
+                    return;
+                }
+                produtos.add(nome);
+                salvarProdutos();
+                abrirOleos();
+                aviso("Óleo cadastrado!");
+            })
+            .setNegativeButton("Cancelar",null).show();
+    }
+
+    boolean nomeExiste(String nome, int ignorar) {
+        for(int i=0;i<produtos.size();i++) {
+            if(i!=ignorar && produtos.get(i).equalsIgnoreCase(nome)) return true;
+        }
+        return false;
+    }
+
+    void selecionarOleo(boolean excluir) {
+        if(produtos.size()<=1) {
+            aviso("Nenhum óleo cadastrado.");
+            return;
+        }
+        String[] nomes = new String[produtos.size()-1];
+        for(int i=1;i<produtos.size();i++) nomes[i-1]=produtos.get(i);
+
+        new AlertDialog.Builder(this)
+            .setTitle(excluir ? "Qual óleo deseja excluir?" : "Qual óleo deseja editar?")
+            .setItems(nomes,(d,qual) -> {
+                int indice = qual+1;
+                if(excluir) excluirOleo(indice);
+                else editarOleo(indice);
+            }).setNegativeButton("Cancelar",null).show();
+    }
+
+    void editarOleo(int indice) {
+        EditText campo = new EditText(this);
+        campo.setText(produtos.get(indice));
+        campo.setHint("Nome do óleo");
+        new AlertDialog.Builder(this)
+            .setTitle("Editar óleo")
+            .setView(campo)
+            .setPositiveButton("Salvar",(d,w) -> {
+                String nome = campo.getText().toString().trim();
+                if(nome.isEmpty() || nome.equalsIgnoreCase("Diesel")) {
+                    aviso("Informe um nome válido.");
+                    return;
+                }
+                if(nomeExiste(nome,indice)) {
+                    aviso("Esse óleo já está cadastrado.");
+                    return;
+                }
+                produtos.set(indice,nome);
+                salvarProdutos();
+                abrirOleos();
+                aviso("Nome atualizado!");
+            })
+            .setNegativeButton("Cancelar",null).show();
+    }
+
+    void excluirOleo(int indice) {
+        for(int i=0;i<movimentos.length();i++) {
+            JSONObject m = movimentos.optJSONObject(i);
+            if(m!=null && m.optInt("produto",-1)==indice) {
+                aviso("Não é possível excluir: esse óleo possui histórico.");
+                return;
+            }
+        }
+        new AlertDialog.Builder(this)
+            .setTitle("Excluir óleo?")
+            .setMessage("Deseja excluir "+produtos.get(indice)+"?")
+            .setPositiveButton("Excluir",(d,w) -> {
+                for(int i=0;i<movimentos.length();i++) {
+                    JSONObject m = movimentos.optJSONObject(i);
+                    if(m!=null && m.optInt("produto",-1)>indice) {
+                        try { m.put("produto",m.optInt("produto")-1); }
+                        catch(Exception e) {}
+                    }
+                }
+                produtos.remove(indice);
+                salvar();
+                salvarProdutos();
+                abrirOleos();
+                aviso("Óleo excluído!");
+            })
+            .setNegativeButton("Cancelar",null).show();
     }
 
     void abrirProduto(int produto) {
@@ -160,7 +280,7 @@ public class MainActivity extends Activity {
         raiz.removeAllViews();
         cabecalho();
 
-        raiz.addView(texto(produtos[produto].toUpperCase(),23));
+        raiz.addView(texto(produtos.get(produto).toUpperCase(),23));
         TextView quantidade = texto("Saldo disponível: "+litros(saldo(produto)),22);
         quantidade.setTextColor(Color.BLACK);
         raiz.addView(quantidade);
@@ -207,7 +327,7 @@ public class MainActivity extends Activity {
         campo.setInputType(8194);
 
         new AlertDialog.Builder(this)
-            .setTitle(tipo+" - "+produtos[produto])
+            .setTitle(tipo+" - "+produtos.get(produto))
             .setView(campo)
             .setPositiveButton("Salvar",(d,w) -> {
                 try {
@@ -341,8 +461,8 @@ public class MainActivity extends Activity {
             y+=28;
             tinta.setTextSize(13);
 
-            for(int i=0;i<produtos.length;i++) {
-                c.drawText(produtos[i]+": "+litros(saldo(i)),30,y,tinta);
+            for(int i=0;i<produtos.size();i++) {
+                c.drawText(produtos.get(i)+": "+litros(saldo(i)),30,y,tinta);
                 y+=22;
             }
 
@@ -356,7 +476,7 @@ public class MainActivity extends Activity {
                 JSONObject m = movimentos.optJSONObject(i);
                 if(m==null) continue;
                 int p = m.optInt("produto");
-                String nome = p>=0 && p<produtos.length ? produtos[p] : "Produto";
+                String nome = p>=0 && p<produtos.size() ? produtos.get(p) : "Produto";
                 String linha = m.optString("data")+" | "+nome+" | "+m.optString("tipo")+" | "+litros(m.optDouble("qtd"));
 
                 if(y>810) {
